@@ -88,9 +88,7 @@ class SelfAttn(nn.Module):
         attn_g = torch.bmm(g, attn.permute(0, 2, 1))
         attn_g = attn_g.view(-1, ch//2, h, w)
         attn_g = self.snconv1x1_o_conv(attn_g)
-        # Out
-        out = x + self.gamma*attn_g
-        return out
+        return x + self.gamma*attn_g
 
 
 class BigGANBatchNorm(nn.Module):
@@ -138,12 +136,18 @@ class BigGANBatchNorm(nn.Module):
             weight = 1 + self.scale(condition_vector).unsqueeze(-1).unsqueeze(-1)
             bias = self.offset(condition_vector).unsqueeze(-1).unsqueeze(-1)
 
-            out = (x - running_mean) / torch.sqrt(running_var + self.eps) * weight + bias
+            return (x - running_mean) / torch.sqrt(running_var + self.eps) * weight + bias
         else:
-            out = F.batch_norm(x, running_mean, running_var, self.weight, self.bias,
-                               training=False, momentum=0.0, eps=self.eps)
-
-        return out
+            return F.batch_norm(
+                x,
+                running_mean,
+                running_var,
+                self.weight,
+                self.bias,
+                training=False,
+                momentum=0.0,
+                eps=self.eps,
+            )
 
 
 class GenBlock(nn.Module):
@@ -195,8 +199,7 @@ class GenBlock(nn.Module):
         if self.up_sample:
             x0 = F.interpolate(x0, scale_factor=2, mode='nearest')
 
-        out = x + x0
-        return out
+        return x + x0
 
 class Generator(nn.Module):
     def __init__(self, config):
@@ -234,18 +237,17 @@ class Generator(nn.Module):
         z = z.view(-1, 4, 4, 16 * self.config.channel_width)
         z = z.permute(0, 3, 1, 2).contiguous()
 
-        for i, layer in enumerate(self.layers):
-            if isinstance(layer, GenBlock):
-                z = layer(z, cond_vector, truncation)
-            else:
-                z = layer(z)
-
+        for layer in self.layers:
+            z = (
+                layer(z, cond_vector, truncation)
+                if isinstance(layer, GenBlock)
+                else layer(z)
+            )
         z = self.bn(z, truncation)
         z = self.relu(z)
         z = self.conv_to_rgb(z)
         z = z[:, :3, ...]
-        z = self.tanh(z)
-        return z
+        return self.tanh(z)
 
 class BigGAN(nn.Module):
     """BigGAN Generator."""
@@ -263,16 +265,18 @@ class BigGAN(nn.Module):
             resolved_model_file = cached_path(model_file, cache_dir=cache_dir)
             resolved_config_file = cached_path(config_file, cache_dir=cache_dir)
         except EnvironmentError:
-            logger.error("Wrong model name, should be a valid path to a folder containing "
-                         "a {} file and a {} file or a model name in {}".format(
-                         WEIGHTS_NAME, CONFIG_NAME, PRETRAINED_MODEL_ARCHIVE_MAP.keys()))
+            logger.error(
+                f"Wrong model name, should be a valid path to a folder containing a {WEIGHTS_NAME} file and a {CONFIG_NAME} file or a model name in {PRETRAINED_MODEL_ARCHIVE_MAP.keys()}"
+            )
             raise
 
-        logger.info("loading model {} from cache at {}".format(pretrained_model_name_or_path, resolved_model_file))
+        logger.info(
+            f"loading model {pretrained_model_name_or_path} from cache at {resolved_model_file}"
+        )
 
         # Load config
         config = BigGANConfig.from_json_file(resolved_config_file)
-        logger.info("Model config {}".format(config))
+        logger.info(f"Model config {config}")
 
         # Instantiate model.
         model = cls(config, *inputs, **kwargs)
